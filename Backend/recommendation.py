@@ -3,7 +3,7 @@
 import math
 from services.weather_service import get_weather
 from services.light_pollution_service import get_light_pollution_level
-from services.campsite_service import get_nearby_campsites
+from services.maps_service import get_nearby_places, get_hiking_trails
 from services.gemini_service import get_ai_recommendation
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -17,65 +17,109 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 def recommend_campsites(user_lat, user_lon, user_preferences):
     """
-    1) Fetch nearby campsites within a certain radius.
-    2) Retrieve weather and light pollution for each site.
-    3) Filter based on user preferences, availability, etc.
-    4) Sort or rank them by some heuristic.
-    5) (Optional) Summarize with Gemini or another LLM.
+    1) Fetch nearby campsites and hiking trails using Google Maps
+    2) Get weather and light pollution data for each location
+    3) Filter and score based on user preferences
+    4) Generate AI recommendations
     """
-    # 1) Get potential campsites
-    candidate_campsites = get_nearby_campsites(user_lat, user_lon)
-
-    # 2) For each campsite, gather additional data
+    # 1) Get potential locations
+    campsites = get_nearby_places(user_lat, user_lon, radius=50000, place_type="campground")
+    hiking_trails = get_hiking_trails(user_lat, user_lon, radius=50000)
+    
+    # 2) Process each location
     results = []
-    for site in candidate_campsites:
-        weather = get_weather(site["lat"], site["lon"])
-        lp_level = get_light_pollution_level(site["lat"], site["lon"])
-        distance = haversine_distance(user_lat, user_lon, site["lat"], site["lon"])
-
-        # 3) Filter out if not available (and user requires availability)
-        if not site["availability"] and user_preferences.get("require_availability", False):
-            continue
-
-        # 4) Simple scoring
-        # Lower light pollution => better
-        # Also factor in distance, user preferences (fishing, hiking, solitude, etc.)
-        # Example: Subtract one point for every 10km
-        # Subtract lp_level from 10 => higher is better
-        # Check if "fishing" is in site amenities if user prefers fishing, etc.
-        base_score = 10 - lp_level  # if lp_level=1 => score=9; if lp_level=5 => score=5 ...
+    for site in campsites:
+        # Get weather and light pollution data
+        weather = get_weather(site["location"]["lat"], site["location"]["lng"])
+        lp_data = get_light_pollution_level(site["location"]["lat"], site["location"]["lng"])
+        
+        # Calculate distance
+        distance = haversine_distance(
+            user_lat, user_lon,
+            site["location"]["lat"], site["location"]["lng"]
+        )
+        
+        # Calculate base score
+        base_score = 10
+        
+        # Weather factors
+        if weather["temp"] and 15 <= weather["temp"] <= 25:  # Ideal temperature range
+            base_score += 2
+        if weather["clouds"] and weather["clouds"] < 30:  # Clear skies
+            base_score += 2
+        if not weather["rain"]:
+            base_score += 1
+            
+        # Light pollution factors
+        if lp_data["level"] >= 8:  # Excellent for stargazing
+            base_score += 3
+        elif lp_data["level"] >= 6:  # Good for stargazing
+            base_score += 2
+            
+        # Distance factor (penalize longer distances)
         base_score -= (distance / 10)
-
-        # If user prefers solitude, remove sites with large facilities (mock).
-        # If user prefers fishing, check if "fishing" is an amenity.
-        # etc. This is just an example:
+        
+        # User preference factors
         if user_preferences.get("prefers_fishing") and "fishing" in site.get("amenities", []):
             base_score += 2
-        if user_preferences.get("prefers_hiking") and "hiking_trails" in site.get("amenities", []):
-            base_score += 2
-        # ... you can add more logic.
-
+        if user_preferences.get("prefers_hiking"):
+            # Check for nearby hiking trails
+            nearby_trails = [t for t in hiking_trails 
+                           if haversine_distance(
+                               site["location"]["lat"], site["location"]["lng"],
+                               t["location"]["lat"], t["location"]["lng"]
+                           ) < 5]  # Within 5km
+            if nearby_trails:
+                base_score += 2
+        if user_preferences.get("prefers_solitude") and not site.get("is_open", True):
+            base_score += 1
+            
+        # Add location to results
         results.append({
             "name": site["name"],
+            "address": site["address"],
+            "location": site["location"],
             "distance": distance,
-            "light_pollution_level": lp_level,
             "weather": weather,
-            "availability": site["availability"],
+            "light_pollution": lp_data,
+            "rating": site.get("rating", 0),
+            "is_open": site.get("is_open", True),
+            "photos": site.get("photos", []),
+            "website": site.get("website"),
+            "phone": site.get("phone"),
+            "directions": site.get("directions"),
             "score": base_score
         })
-
-    # Sort by score desc
+    
+    # Sort by score
     results.sort(key=lambda x: x["score"], reverse=True)
-
-    # 5) Optionally ask Gemini for a final textual recommendation
-    top_spots_text = "\n".join([f"{idx+1}. {res['name']} (score: {res['score']:.2f})" for idx, res in enumerate(results[:5])])
-    prompt = f"""User preferences: {user_preferences}.
-Candidate campsites:\n{top_spots_text}\n
-Which campsite is best for the user and why? Provide a succinct recommendation.
+    
+    # Get top locations for AI recommendation
+    top_spots = results[:5]
+    top_spots_text = "\n".join([
+        f"{idx+1}. {spot['name']} (score: {spot['score']:.2f})\n"
+        f"   Weather: {spot['weather']['description']}, "
+        f"Temperature: {spot['weather']['temp']}°C\n"
+        f"   Light Pollution: {spot['light_pollution']['level']}/10\n"
+        f"   Distance: {spot['distance']:.1f}km"
+        for idx, spot in enumerate(top_spots)
+    ])
+    
+    # Generate AI recommendation
+    prompt = f"""User preferences: {user_preferences}
+Top camping spots:\n{top_spots_text}\n
+Based on the weather conditions, light pollution levels, and user preferences,
+which campsite would be the best choice and why? Consider:
+1. Weather conditions for camping and stargazing
+2. Light pollution levels for stargazing
+3. Distance and accessibility
+4. User preferences (fishing, hiking, solitude)
+Provide a detailed recommendation with specific reasons.
 """
     ai_summary = get_ai_recommendation(prompt)
-
+    
     return {
         "results": results,
-        "ai_summary": ai_summary
+        "ai_summary": ai_summary,
+        "hiking_trails": hiking_trails
     }

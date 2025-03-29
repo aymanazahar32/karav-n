@@ -1,7 +1,7 @@
 // src/App.js
 import React, { useState } from "react";
 import LoginForm from "./components/LoginForm";
-import SignupForm from "./components/SignupForm";
+import SignUpForm from "./components/SignUpForm";
 import Dashboard from "./components/Dashboard";
 import "./styles.css";
 
@@ -27,7 +27,7 @@ function App() {
             </>
           ) : (
             <>
-              <SignupForm setUser={setUser} />
+              <SignUpForm setUser={setUser} />
               <div className="toggle-form">
                 <p>
                   Already have an account?{" "}

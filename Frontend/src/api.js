@@ -1,27 +1,86 @@
 // src/api.js
 import axios from "axios";
 
-const API = axios.create({
-  baseURL: "http://localhost:5000/api" // Adjust if your Flask runs on a different port
+const API_URL = "http://localhost:5000/api";
+
+const api = axios.create({
+  baseURL: API_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
 });
 
 // Auth
-export const signup = (email, password) =>
-  API.post("/signup", { email, password });
-export const login = (email, password) =>
-  API.post("/login", { email, password });
+export const signup = async (email, password) => {
+  try {
+    const response = await api.post("/signup", { email, password });
+    return response;
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const login = async (email, password) => {
+  try {
+    const response = await api.post("/login", { email, password });
+    return response;
+  } catch (error) {
+    throw error;
+  }
+};
 
 // Preferences
-export const updatePreferences = (userId, prefs) =>
-  API.post("/preferences", { user_id: userId, ...prefs });
+export const updatePreferences = async (userId, preferences) => {
+  try {
+    const response = await api.post("/preferences", {
+      user_id: userId,
+      ...preferences,
+    });
+    return response;
+  } catch (error) {
+    throw error;
+  }
+};
 
 // Reviews
-export const postReview = (userId, campsiteName, rating, reviewText) =>
-  API.post("/review", { user_id: userId, campsite_name: campsiteName, rating, review_text: reviewText });
+export const postReview = async (userId, campsiteName, rating, reviewText) => {
+  try {
+    const response = await api.post("/review", {
+      user_id: userId,
+      campsite_name: campsiteName,
+      rating,
+      review_text: reviewText,
+    });
+    return response;
+  } catch (error) {
+    throw error;
+  }
+};
 
-export const getReviews = (campsiteName) =>
-  API.get(`/reviews/${encodeURIComponent(campsiteName)}`);
+export const getReviews = async (campsiteName) => {
+  try {
+    const response = await api.get(`/reviews/${campsiteName}`);
+    return response;
+  } catch (error) {
+    throw error;
+  }
+};
 
 // Recommendations
-export const getRecommendations = (lat, lon, userId, preferences) =>
-  API.post("/recommendations", { lat, lon, user_id: userId, preferences });
+export const getRecommendations = async (userId) => {
+  try {
+    // Get user's location using the browser's geolocation API
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject);
+    });
+
+    const response = await api.post("/recommendations", {
+      user_id: userId,
+      lat: position.coords.latitude,
+      lon: position.coords.longitude,
+    });
+    return response;
+  } catch (error) {
+    throw error;
+  }
+};

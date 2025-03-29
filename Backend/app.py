@@ -6,6 +6,7 @@ from config import Config
 from database import db
 from models import User, CampReview
 from recommendation import recommend_campsites
+from services.maps_service import get_location_details, get_nearby_places, get_hiking_trails
 from werkzeug.security import generate_password_hash, check_password_hash
 
 def create_app():
@@ -72,6 +73,71 @@ def update_preferences():
     db.session.commit()
     return jsonify({"message": "Preferences updated", "user": user.to_dict()})
 
+# Get location details from address
+@app.route("/api/location", methods=["GET"])
+def get_location():
+    address = request.args.get("address")
+    if not address:
+        return jsonify({"error": "Address is required"}), 400
+
+    location = get_location_details(address)
+    if not location:
+        return jsonify({"error": "Location not found"}), 404
+
+    return jsonify(location)
+
+# Get nearby places
+@app.route("/api/places", methods=["GET"])
+def get_places():
+    lat = request.args.get("lat", type=float)
+    lon = request.args.get("lon", type=float)
+    radius = request.args.get("radius", type=int, default=50000)
+    place_type = request.args.get("type", default="campground")
+
+    if not lat or not lon:
+        return jsonify({"error": "Latitude and longitude are required"}), 400
+
+    places = get_nearby_places(lat, lon, radius, place_type)
+    return jsonify(places)
+
+# Get hiking trails
+@app.route("/api/trails", methods=["GET"])
+def get_trails():
+    lat = request.args.get("lat", type=float)
+    lon = request.args.get("lon", type=float)
+    radius = request.args.get("radius", type=int, default=50000)
+
+    if not lat or not lon:
+        return jsonify({"error": "Latitude and longitude are required"}), 400
+
+    trails = get_hiking_trails(lat, lon, radius)
+    return jsonify(trails)
+
+# Get recommendations
+@app.route("/api/recommendations", methods=["POST"])
+def get_recommendations():
+    data = request.json
+    user_lat = data.get("lat")
+    user_lon = data.get("lon")
+    user_id = data.get("user_id")
+
+    if not (user_lat and user_lon):
+        return jsonify({"error": "Latitude and longitude are required"}), 400
+
+    user = User.query.get(user_id) if user_id else None
+    user_prefs = {}
+    if user:
+        # Build user preferences from DB
+        user_prefs["prefers_fishing"] = user.prefers_fishing
+        user_prefs["prefers_hiking"] = user.prefers_hiking
+        user_prefs["prefers_solitude"] = user.prefers_solitude
+    
+    # Merge in any additional preferences from the request
+    user_prefs.update(data.get("preferences", {}))
+
+    recommendations = recommend_campsites(user_lat, user_lon, user_prefs)
+    return jsonify(recommendations)
+
 # Post a review
 @app.route("/api/review", methods=["POST"])
 def post_review():
@@ -101,31 +167,6 @@ def post_review():
 def get_reviews(campsite_name):
     reviews = CampReview.query.filter_by(campsite_name=campsite_name).all()
     return jsonify([r.to_dict() for r in reviews])
-
-# Recommendation endpoint
-@app.route("/api/recommendations", methods=["POST"])
-def get_recommendations():
-    data = request.json
-    user_lat = data.get("lat")
-    user_lon = data.get("lon")
-    user_id = data.get("user_id")
-
-    user = User.query.get(user_id) if user_id else None
-    user_prefs = {}
-    if user:
-        # Build user preferences from DB
-        user_prefs["prefers_fishing"] = user.prefers_fishing
-        user_prefs["prefers_hiking"] = user.prefers_hiking
-        user_prefs["prefers_solitude"] = user.prefers_solitude
-    
-    # Merge in any additional preferences from the request
-    user_prefs.update(data.get("preferences", {}))
-
-    if not (user_lat and user_lon):
-        return jsonify({"error": "lat/lon are required"}), 400
-
-    recommendations = recommend_campsites(user_lat, user_lon, user_prefs)
-    return jsonify(recommendations)
 
 if __name__ == "__main__":
     app.run(debug=True)
