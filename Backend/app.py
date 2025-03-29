@@ -24,7 +24,7 @@ def create_tables():
 
 @app.route("/")
 def index():
-    return jsonify({"message": "Welcome to the AI-Powered Camping/Stargazing App!"})
+    return jsonify({"message": "Welcome to Karaván! Where will the roads take you next?"})
 
 # User sign-up
 @app.route("/api/signup", methods=["POST"])
